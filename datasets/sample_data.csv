@@ -1,0 +1,9 @@
+Age,Income,City,Gender,Purchased
+25,45000,New York,Male,No
+27,48000,Paris,Female,Yes
+30,,London,Male,No
+35,61000,New York,,No
+40,70000,Paris,Female,Yes
+,,London,Male,Yes
+25,45000,New York,Male,No
+45,80000,Paris,Female,Yes
