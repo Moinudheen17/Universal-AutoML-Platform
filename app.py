@@ -11,7 +11,7 @@ from modules.preprocessor import Preprocessor
 from modules.model_trainer import ModelTrainer
 
 # Set the page configuration
-st.set_page_config(page_title="Universal AutoML Platform", page_icon="⚙️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Universal AutoML Platform v2", page_icon="⚙️", layout="wide", initial_sidebar_state="expanded")
 
 # --- CUSTOM CSS INJECTION ---
 st.markdown("""
