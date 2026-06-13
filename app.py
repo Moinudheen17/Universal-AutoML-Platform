@@ -459,7 +459,7 @@ else:
                 if is_classification:
                     cm = confusion_matrix(y_eval, y_pred_eval)
                     sns.heatmap(cm, annot=True, fmt='d', cmap='YlGnBu', ax=ax_eval, cbar=False,
-                                linewidths=0.5, linecolor='rgba(255,255,255,0.05)')
+                                linewidths=0.5, linecolor='#0d1325')
                     ax_eval.set_title("Confusion Matrix", color='#6b7280', fontsize=12)
                     ax_eval.set_xlabel("Predicted", color='#4b5563', fontsize=11)
                     ax_eval.set_ylabel("Actual", color='#4b5563', fontsize=11)
