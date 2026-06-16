@@ -257,7 +257,13 @@ with st.sidebar:
     if uploaded_file is not None:
         if "last_uploaded" not in st.session_state or st.session_state.last_uploaded != uploaded_file.name:
             st.session_state.last_uploaded = uploaded_file.name
-            for f in ["outputs/best_model.pkl", "outputs/performance_report.csv", "outputs/target_encoder.pkl"]:
+            # Clear all saved files including individual models
+            import glob
+            files_to_clear = (
+                ["outputs/best_model.pkl", "outputs/performance_report.csv", "outputs/target_encoder.pkl"]
+                + glob.glob("outputs/model_*.pkl")
+            )
+            for f in files_to_clear:
                 if os.path.exists(f):
                     os.remove(f)
 
@@ -361,9 +367,27 @@ else:
                     with open("outputs/target_encoder.pkl", "wb") as f:
                         pickle.dump(target_encoder, f)
 
+                # Show column handling report
+                col_report = preprocessor.get_column_report()
+                text_cols  = col_report["text_columns"]
+                cat_cols   = [c for c in col_report["categorical_columns"] if c != target_col]
+                tfidf_info = col_report["tfidf_features"]
+                if text_cols or cat_cols:
+                    report_html = '<div style="background:rgba(0,119,255,0.05);border:1px solid rgba(0,119,255,0.15);border-radius:14px;padding:14px 18px;margin-bottom:12px;">'
+                    report_html += '<div style="font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:1px;margin-bottom:10px;">COLUMN HANDLING REPORT</div>'
+                    report_html += '<div style="display:flex;flex-wrap:wrap;gap:8px;">'
+                    for col in text_cols:
+                        feat = tfidf_info.get(col, "TF-IDF")
+                        report_html += f'<span style="background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.25);border-radius:20px;padding:4px 12px;font-size:11px;color:#c4b5fd;">📝 {col} → TF-IDF ({feat})</span>'
+                    for col in cat_cols:
+                        report_html += f'<span style="background:rgba(0,229,194,0.08);border:1px solid rgba(0,229,194,0.2);border-radius:20px;padding:4px 12px;font-size:11px;color:#00e5c2;">🏷️ {col} → Label Encoded</span>'
+                    report_html += '</div></div>'
+                    st.markdown(report_html, unsafe_allow_html=True)
+
                 trainer = ModelTrainer(X, y)
                 results_df = trainer.train_and_evaluate()
                 trainer.save_best_model("outputs")
+                trainer.save_all_models("outputs")   # ✅ save every model
                 results_df.to_csv("outputs/performance_report.csv", index=False)
 
                 st.success("✅ Pipeline complete! Results ready below.")
@@ -390,12 +414,44 @@ else:
         best_model_name   = report.iloc[0]['Model']
         original_classes  = sorted(raw_df[target_col].dropna().unique())
 
+        # ── MODEL SWITCHER ───────────────────────────────────────────────────
+        all_model_names = report['Model'].tolist()
+
+        st.markdown("""
+        <div style="font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:1.2px;margin-bottom:8px;">
+          MODEL SELECTION
+        </div>""", unsafe_allow_html=True)
+
+        col_sel, col_info = st.columns([2, 1])
+        with col_sel:
+            selected_model_name = st.selectbox(
+                "Choose model to use for predictions",
+                options=all_model_names,
+                index=0,
+                help="Auto-selected = best performing model. You can switch to any other trained model."
+            )
+
+        # Load selected model
+        selected_model_path = f"outputs/model_{selected_model_name.replace(' ', '_')}.pkl"
+        if selected_model_name != best_model_name and os.path.exists(selected_model_path):
+            model = joblib.load(selected_model_path)
+            with col_info:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.info(f"Using: **{selected_model_name}**")
+        else:
+            with col_info:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.success(f"✅ Auto-best: **{best_model_name}**")
+
+        st.markdown('<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);margin:10px 0 14px;"></div>', unsafe_allow_html=True)
+
         # Download button
-        with open(model_path, "rb") as f:
+        active_model_path = selected_model_path if (selected_model_name != best_model_name and os.path.exists(selected_model_path)) else model_path
+        with open(active_model_path, "rb") as f:
             st.download_button(
-                label="📥 Export Trained Model (.pkl)",
+                label=f"📥 Export {selected_model_name} (.pkl)",
                 data=f,
-                file_name=f"best_model_{best_model_name.replace(' ','_')}.pkl",
+                file_name=f"model_{selected_model_name.replace(' ','_')}.pkl",
                 mime="application/octet-stream"
             )
 
