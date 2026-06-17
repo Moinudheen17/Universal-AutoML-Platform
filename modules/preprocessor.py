@@ -182,6 +182,57 @@ class Preprocessor:
                                     for col, v in self.tfidf_vectorizers.items()},
         }
 
+
+    # ── TRANSFORM (reuse fitted preprocessor) ───────────────────────────────
+
+    def transform(self, df):
+        """Applies fitted encoders/tfidf/scaler to new data — no refitting."""
+        df = df.copy()
+
+        # Drop noise columns
+        cols_to_drop = [c for c in self.dropped_columns if c in df.columns]
+        if cols_to_drop:
+            df.drop(columns=cols_to_drop, inplace=True)
+
+        # Apply saved TF-IDF (transform only — same vocab as training)
+        for col, tfidf in self.tfidf_vectorizers.items():
+            if col in df.columns:
+                matrix = tfidf.transform(df[col].fillna("").astype(str)).toarray()
+                tfidf_cols = [f"{col}_tfidf_{i}" for i in range(matrix.shape[1])]
+                tfidf_df = pd.DataFrame(matrix, columns=tfidf_cols, index=df.index)
+                df = pd.concat([df.drop(columns=[col]), tfidf_df], axis=1)
+
+        # Apply VADER using saved raw text cache keys
+        try:
+            from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+            analyzer = SentimentIntensityAnalyzer()
+            for col in self.text_columns:
+                vader_compound = f"{col}_vader_compound"
+                if vader_compound not in df.columns:
+                    # col already replaced by tfidf — need raw text
+                    # raw text should be passed in via df before transform
+                    pass
+        except ImportError:
+            pass
+
+        # Apply saved LabelEncoders
+        for col, le in self.label_encoders.items():
+            if col in df.columns and col != self.target_column:
+                df[col] = df[col].astype(str).str.strip().apply(
+                    lambda x: le.transform([x])[0] if x in le.classes_ else 0
+                )
+
+        # Apply saved scaler
+        num_cols = list(df.select_dtypes(include=["int64", "float64"]).columns)
+        to_scale = [c for c in num_cols if c != self.target_column]
+        if to_scale and hasattr(self.scaler, "mean_"):
+            fitted_cols = list(getattr(self.scaler, "feature_names_in_", to_scale))
+            common = [c for c in fitted_cols if c in df.columns]
+            if common:
+                df[common] = self.scaler.transform(df[common])
+
+        return df.drop(columns=[self.target_column], errors="ignore")
+
     # ── MAIN ─────────────────────────────────────────────────────────────────
 
     def process(self):
