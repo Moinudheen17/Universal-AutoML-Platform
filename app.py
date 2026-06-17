@@ -260,7 +260,8 @@ with st.sidebar:
             # Clear all saved files including individual models
             import glob
             files_to_clear = (
-                ["outputs/best_model.pkl", "outputs/performance_report.csv", "outputs/target_encoder.pkl"]
+                ["outputs/best_model.pkl", "outputs/performance_report.csv",
+                 "outputs/target_encoder.pkl", "outputs/preprocessor.pkl"]
                 + glob.glob("outputs/model_*.pkl")
             )
             for f in files_to_clear:
@@ -366,13 +367,17 @@ else:
                 if target_encoder is not None:
                     with open("outputs/target_encoder.pkl", "wb") as f:
                         pickle.dump(target_encoder, f)
+                # ✅ Save the fitted preprocessor so predictions reuse same features
+                with open("outputs/preprocessor.pkl", "wb") as f:
+                    pickle.dump(preprocessor, f)
 
                 # Show column handling report
                 col_report = preprocessor.get_column_report()
                 text_cols  = col_report["text_columns"]
                 cat_cols   = [c for c in col_report["categorical_columns"] if c != target_col]
                 tfidf_info = col_report["tfidf_features"]
-                if text_cols or cat_cols:
+                dropped_cols = col_report.get("dropped_columns", [])
+                if text_cols or cat_cols or dropped_cols:
                     report_html = '<div style="background:rgba(0,119,255,0.05);border:1px solid rgba(0,119,255,0.15);border-radius:14px;padding:14px 18px;margin-bottom:12px;">'
                     report_html += '<div style="font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:1px;margin-bottom:10px;">COLUMN HANDLING REPORT</div>'
                     report_html += '<div style="display:flex;flex-wrap:wrap;gap:8px;">'
@@ -381,6 +386,8 @@ else:
                         report_html += f'<span style="background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.25);border-radius:20px;padding:4px 12px;font-size:11px;color:#c4b5fd;">📝 {col} → TF-IDF ({feat})</span>'
                     for col in cat_cols:
                         report_html += f'<span style="background:rgba(0,229,194,0.08);border:1px solid rgba(0,229,194,0.2);border-radius:20px;padding:4px 12px;font-size:11px;color:#00e5c2;">🏷️ {col} → Label Encoded</span>'
+                    for col in dropped_cols:
+                        report_html += f'<span style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);border-radius:20px;padding:4px 12px;font-size:11px;color:#f87171;">🗑️ {col} → Dropped (noise)</span>'
                     report_html += '</div></div>'
                     st.markdown(report_html, unsafe_allow_html=True)
 
@@ -409,6 +416,13 @@ else:
         if os.path.exists(encoder_path):
             with open(encoder_path, "rb") as f:
                 target_encoder = pickle.load(f)
+
+        # ✅ Load saved preprocessor — reuse for predictions (fixes feature mismatch)
+        saved_preprocessor = None
+        prep_path = "outputs/preprocessor.pkl"
+        if os.path.exists(prep_path):
+            with open(prep_path, "rb") as f:
+                saved_preprocessor = pickle.load(f)
 
         is_classification = 'Accuracy' in report.columns
         best_model_name   = report.iloc[0]['Model']
@@ -506,8 +520,14 @@ else:
         with tab2:
             st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1px;margin-bottom:12px;">EVALUATION VISUAL</div>', unsafe_allow_html=True)
             try:
-                prep_eval  = Preprocessor(raw_df, target_column=target_col)
-                X_eval, y_eval = prep_eval.process()
+                if saved_preprocessor:
+                    X_eval = saved_preprocessor.transform(raw_df)
+                else:
+                    prep_eval = Preprocessor(raw_df, target_column=target_col)
+                    X_eval, _ = prep_eval.process()
+                y_eval = raw_df[target_col]
+                if saved_preprocessor and saved_preprocessor.get_target_encoder():
+                    y_eval = saved_preprocessor.get_target_encoder().transform(y_eval.astype(str).str.strip())
                 y_pred_eval = model.predict(X_eval)
                 fig_eval, ax_eval = plt.subplots(figsize=(7, 5))
                 fig_eval.patch.set_facecolor('#0d1325')
@@ -537,8 +557,11 @@ else:
             st.markdown('<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);margin:16px 0;"></div>', unsafe_allow_html=True)
             st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1px;margin-bottom:12px;">FEATURE IMPORTANCE</div>', unsafe_allow_html=True)
             try:
-                prep_explain = Preprocessor(raw_df, target_column=target_col)
-                X_explain, _ = prep_explain.process()
+                if saved_preprocessor:
+                    X_explain = saved_preprocessor.transform(raw_df)
+                else:
+                    prep_explain = Preprocessor(raw_df, target_column=target_col)
+                    X_explain, _ = prep_explain.process()
                 feature_names = X_explain.columns
                 importances = None
                 if hasattr(model, 'feature_importances_'):
@@ -576,10 +599,14 @@ else:
                 with st.spinner("Analyzing..."):
                     try:
                         edited_df[target_col] = raw_df[target_col].iloc[0]
-                        combined_df = pd.concat([raw_df, edited_df], ignore_index=True)
-                        prep_new = Preprocessor(combined_df, target_column=target_col)
-                        X_new, _ = prep_new.process()
-                        raw_prediction = model.predict(X_new.iloc[[-1]])[0]
+                        if saved_preprocessor:
+                            X_new = saved_preprocessor.transform(edited_df)
+                        else:
+                            combined_df = pd.concat([raw_df, edited_df], ignore_index=True)
+                            prep_new = Preprocessor(combined_df, target_column=target_col)
+                            X_new, _ = prep_new.process()
+                            X_new = X_new.iloc[[-1]]
+                        raw_prediction = model.predict(X_new)[0]
 
                         if is_classification:
                             if target_encoder is not None:
@@ -634,10 +661,14 @@ else:
                             batch_process_df = batch_df.copy()
                             if target_col not in batch_process_df.columns:
                                 batch_process_df[target_col] = raw_df[target_col].iloc[0]
-                            combined_batch = pd.concat([raw_df, batch_process_df], ignore_index=True)
-                            prep_batch = Preprocessor(combined_batch, target_column=target_col)
-                            X_batch, _ = prep_batch.process()
-                            preds = model.predict(X_batch.iloc[-len(batch_df):])
+                            if saved_preprocessor:
+                                X_batch = saved_preprocessor.transform(batch_process_df)
+                            else:
+                                combined_batch = pd.concat([raw_df, batch_process_df], ignore_index=True)
+                                prep_batch = Preprocessor(combined_batch, target_column=target_col)
+                                X_batch, _ = prep_batch.process()
+                                X_batch = X_batch.iloc[-len(batch_df):]
+                            preds = model.predict(X_batch)
 
                             if is_classification:
                                 if target_encoder is not None:
