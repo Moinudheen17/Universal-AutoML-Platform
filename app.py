@@ -6,6 +6,7 @@ import pandas as pd
 import joblib
 import pickle
 import os
+import glob
 from sklearn.metrics import confusion_matrix
 from modules.data_cleaner import DataCleaner
 from modules.preprocessor import Preprocessor
@@ -13,235 +14,128 @@ from modules.model_trainer import ModelTrainer
 
 st.set_page_config(page_title="Universal AutoML Engine", page_icon="⚙️", layout="wide", initial_sidebar_state="expanded")
 
-# ── FLUID GLASSMORPHISM CSS ──────────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── GLOBAL ── */
 footer {visibility: hidden;}
 #MainMenu {visibility: hidden;}
-html, body, [data-testid="stAppViewContainer"] {
-    background: #060b18 !important;
-}
-
-/* ── SIDEBAR ── */
-[data-testid="stSidebar"] {
-    background: #0a0f1e !important;
-    border-right: 1px solid rgba(0,229,194,0.08) !important;
-}
+html, body, [data-testid="stAppViewContainer"] { background: #060b18 !important; }
+[data-testid="stSidebar"] { background: #0a0f1e !important; border-right: 1px solid rgba(0,229,194,0.08) !important; }
 [data-testid="stSidebar"] * { color: #ffffff !important; }
-[data-testid="stSidebar"] .stFileUploader {
-    border: 1px dashed rgba(0,229,194,0.2) !important;
-    border-radius: 14px !important;
-    background: rgba(0,229,194,0.02) !important;
-    padding: 8px;
-}
+[data-testid="stSidebar"] .stFileUploader { border: 1px dashed rgba(0,229,194,0.2) !important; border-radius: 14px !important; background: rgba(0,229,194,0.02) !important; padding: 8px; }
 [data-testid="stSidebar"] label { color: rgba(255,255,255,0.35) !important; font-size: 11px !important; }
-
-/* ── MAIN BG ── */
-[data-testid="stMain"] {
-    background: #060b18 !important;
-}
-.main .block-container {
-    background: #060b18 !important;
-    padding-top: 1.5rem !important;
-}
-
-/* ── BUTTONS ── */
-.stButton > button {
-    background: linear-gradient(135deg, #00c9a7, #0077ff) !important;
-    color: #fff !important;
-    border: none !important;
-    border-radius: 14px !important;
-    padding: 10px 22px !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-    box-shadow: 0 4px 24px rgba(0,119,255,0.25) !important;
-    transition: all 0.25s ease !important;
-}
-.stButton > button:hover {
-    box-shadow: 0 6px 32px rgba(0,229,194,0.35) !important;
-    transform: translateY(-1px) !important;
-}
-
-/* ── DOWNLOAD BUTTON ── */
-[data-testid="stDownloadButton"] button {
-    background: rgba(0,229,194,0.08) !important;
-    color: #00e5c2 !important;
-    border: 1px solid rgba(0,229,194,0.25) !important;
-    border-radius: 12px !important;
-}
-
-/* ── METRICS ── */
-[data-testid="stMetric"] {
-    background: rgba(255,255,255,0.02) !important;
-    border: 1px solid rgba(255,255,255,0.05) !important;
-    border-radius: 18px !important;
-    padding: 16px 20px !important;
-}
+[data-testid="stMain"] { background: #060b18 !important; }
+.main .block-container { background: #060b18 !important; padding-top: 1.5rem !important; }
+.stButton > button { background: linear-gradient(135deg, #00c9a7, #0077ff) !important; color: #fff !important; border: none !important; border-radius: 14px !important; padding: 10px 22px !important; font-size: 13px !important; font-weight: 500 !important; box-shadow: 0 4px 24px rgba(0,119,255,0.25) !important; transition: all 0.25s ease !important; }
+.stButton > button:hover { box-shadow: 0 6px 32px rgba(0,229,194,0.35) !important; transform: translateY(-1px) !important; }
+[data-testid="stDownloadButton"] button { background: rgba(0,229,194,0.08) !important; color: #00e5c2 !important; border: 1px solid rgba(0,229,194,0.25) !important; border-radius: 12px !important; }
+[data-testid="stMetric"] { background: rgba(255,255,255,0.02) !important; border: 1px solid rgba(255,255,255,0.05) !important; border-radius: 18px !important; padding: 16px 20px !important; }
 [data-testid="stMetricValue"] { color: #00e5c2 !important; font-size: 26px !important; }
 [data-testid="stMetricLabel"] { color: rgba(255,255,255,0.3) !important; font-size: 11px !important; }
-
-/* ── TABS ── */
-.stTabs [data-baseweb="tab-list"] {
-    background: rgba(255,255,255,0.02) !important;
-    border: 1px solid rgba(255,255,255,0.05) !important;
-    border-radius: 14px !important;
-    padding: 4px !important;
-    gap: 4px !important;
-}
-.stTabs [data-baseweb="tab"] {
-    border-radius: 10px !important;
-    color: rgba(255,255,255,0.35) !important;
-    font-size: 12px !important;
-    padding: 7px 16px !important;
-}
-.stTabs [aria-selected="true"] {
-    background: rgba(0,229,194,0.1) !important;
-    color: #00e5c2 !important;
-    border: 1px solid rgba(0,229,194,0.2) !important;
-}
+.stTabs [data-baseweb="tab-list"] { background: rgba(255,255,255,0.02) !important; border: 1px solid rgba(255,255,255,0.05) !important; border-radius: 14px !important; padding: 4px !important; gap: 4px !important; }
+.stTabs [data-baseweb="tab"] { border-radius: 10px !important; color: rgba(255,255,255,0.35) !important; font-size: 12px !important; padding: 7px 16px !important; }
+.stTabs [aria-selected="true"] { background: rgba(0,229,194,0.1) !important; color: #00e5c2 !important; border: 1px solid rgba(0,229,194,0.2) !important; }
 .stTabs [data-baseweb="tab-border"] { display: none !important; }
-
-/* ── EXPANDER ── */
-.streamlit-expanderHeader {
-    background: rgba(255,255,255,0.02) !important;
-    border: 1px solid rgba(255,255,255,0.05) !important;
-    border-radius: 14px !important;
-    color: rgba(255,255,255,0.6) !important;
-}
-.streamlit-expanderContent {
-    background: rgba(255,255,255,0.01) !important;
-    border: 1px solid rgba(255,255,255,0.04) !important;
-    border-radius: 0 0 14px 14px !important;
-}
-
-/* ── DATAFRAME ── */
-[data-testid="stDataFrame"] {
-    border-radius: 14px !important;
-    overflow: hidden !important;
-    border: 1px solid rgba(255,255,255,0.05) !important;
-}
-
-/* ── DATA EDITOR ── */
-[data-testid="stDataEditor"] {
-    border-radius: 14px !important;
-    border: 1px solid rgba(0,229,194,0.12) !important;
-    overflow: hidden !important;
-}
-
-/* ── PROGRESS BARS ── */
-.stProgress > div > div {
-    background: linear-gradient(90deg, #00b894, #00e5c2) !important;
-    border-radius: 4px !important;
-}
-.stProgress > div {
-    background: rgba(255,255,255,0.05) !important;
-    border-radius: 4px !important;
-}
-
-/* ── ALERTS ── */
-.stSuccess {
-    background: rgba(0,229,194,0.07) !important;
-    border: 1px solid rgba(0,229,194,0.2) !important;
-    border-radius: 14px !important;
-    color: #00e5c2 !important;
-}
-.stInfo {
-    background: rgba(0,119,255,0.07) !important;
-    border: 1px solid rgba(0,119,255,0.2) !important;
-    border-radius: 14px !important;
-}
-.stWarning {
-    background: rgba(245,158,11,0.07) !important;
-    border: 1px solid rgba(245,158,11,0.2) !important;
-    border-radius: 14px !important;
-}
-.stError {
-    background: rgba(248,113,113,0.07) !important;
-    border: 1px solid rgba(248,113,113,0.2) !important;
-    border-radius: 14px !important;
-}
-
-/* ── SELECTBOX ── */
-[data-testid="stSelectbox"] > div > div {
-    background: rgba(255,255,255,0.03) !important;
-    border: 1px solid rgba(255,255,255,0.07) !important;
-    border-radius: 12px !important;
-    color: rgba(255,255,255,0.7) !important;
-}
-
-/* ── DIVIDER ── */
-hr {
-    border: none !important;
-    border-top: 1px solid rgba(255,255,255,0.05) !important;
-    margin: 1.2rem 0 !important;
-}
-
-/* ── HEADINGS ── */
+.streamlit-expanderHeader { background: rgba(255,255,255,0.02) !important; border: 1px solid rgba(255,255,255,0.05) !important; border-radius: 14px !important; color: rgba(255,255,255,0.6) !important; }
+[data-testid="stDataFrame"] { border-radius: 14px !important; overflow: hidden !important; border: 1px solid rgba(255,255,255,0.05) !important; }
+[data-testid="stDataEditor"] { border-radius: 14px !important; border: 1px solid rgba(0,229,194,0.12) !important; overflow: hidden !important; }
+.stProgress > div > div { background: linear-gradient(90deg, #00b894, #00e5c2) !important; border-radius: 4px !important; }
+.stProgress > div { background: rgba(255,255,255,0.05) !important; border-radius: 4px !important; }
+.stSuccess { background: rgba(0,229,194,0.07) !important; border: 1px solid rgba(0,229,194,0.2) !important; border-radius: 14px !important; color: #00e5c2 !important; }
+.stInfo { background: rgba(0,119,255,0.07) !important; border: 1px solid rgba(0,119,255,0.2) !important; border-radius: 14px !important; }
+.stWarning { background: rgba(245,158,11,0.07) !important; border: 1px solid rgba(245,158,11,0.2) !important; border-radius: 14px !important; }
+.stError { background: rgba(248,113,113,0.07) !important; border: 1px solid rgba(248,113,113,0.2) !important; border-radius: 14px !important; }
+[data-testid="stSelectbox"] > div > div { background: rgba(255,255,255,0.03) !important; border: 1px solid rgba(255,255,255,0.07) !important; border-radius: 12px !important; color: rgba(255,255,255,0.7) !important; }
+hr { border: none !important; border-top: 1px solid rgba(255,255,255,0.05) !important; margin: 1.2rem 0 !important; }
 h1, h2, h3, h4 { color: #ffffff !important; }
 p, li, span { color: rgba(255,255,255,0.65); }
-
-/* ── SPINNER ── */
 .stSpinner > div { border-top-color: #00e5c2 !important; }
-
-/* ── MATPLOTLIB CHARTS ── */
-.stPlotlyChart, .stPyplot {
-    background: rgba(255,255,255,0.02) !important;
-    border: 1px solid rgba(255,255,255,0.05) !important;
-    border-radius: 18px !important;
-    padding: 12px !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
-# ── HERO BANNER ──────────────────────────────────────────────────────────────
+# ── HERO ─────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="
-    background: linear-gradient(120deg, rgba(0,229,194,0.07) 0%, rgba(0,119,255,0.07) 60%, rgba(139,92,246,0.05) 100%);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 22px;
-    padding: 28px 32px;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    position: relative;
-    overflow: hidden;
-">
+<div style="background:linear-gradient(120deg,rgba(0,229,194,0.07) 0%,rgba(0,119,255,0.07) 60%,rgba(139,92,246,0.05) 100%);
+            border:1px solid rgba(255,255,255,0.06);border-radius:22px;padding:28px 32px;
+            margin-bottom:8px;position:relative;overflow:hidden;">
   <div style="position:absolute;top:-60px;left:-60px;width:260px;height:260px;border-radius:50%;
               background:radial-gradient(circle,rgba(0,229,194,0.08),transparent 70%);pointer-events:none;"></div>
   <div style="position:absolute;bottom:-80px;right:80px;width:220px;height:220px;border-radius:50%;
               background:radial-gradient(circle,rgba(0,119,255,0.07),transparent 70%);pointer-events:none;"></div>
-  <div style="position:relative;z-index:1;">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-      <div style="width:40px;height:40px;border-radius:13px;
-                  background:linear-gradient(135deg,#00e5c2,#0077ff);
-                  display:flex;align-items:center;justify-content:center;
-                  box-shadow:0 4px 20px rgba(0,229,194,0.3);font-size:18px;">⚙️</div>
-      <h1 style="margin:0;font-size:22px;font-weight:600;color:#fff;">Universal AutoML Engine</h1>
+  <div style="position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+        <div style="width:40px;height:40px;border-radius:13px;background:linear-gradient(135deg,#00e5c2,#0077ff);
+                    display:flex;align-items:center;justify-content:center;
+                    box-shadow:0 4px 20px rgba(0,229,194,0.3);font-size:18px;">⚙️</div>
+        <h1 style="margin:0;font-size:22px;font-weight:600;color:#fff;">Universal AutoML Engine</h1>
+      </div>
+      <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.35);padding-left:52px;">
+        Intelligent Data Pipelines & Predictive Analytics
+      </p>
     </div>
-    <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.35);padding-left:52px;">
-      Intelligent Data Pipelines & Predictive Analytics
-    </p>
-  </div>
-  <div style="display:flex;align-items:center;gap:7px;
-              background:rgba(0,229,194,0.08);
-              border:1px solid rgba(0,229,194,0.2);
-              border-radius:30px;padding:7px 16px;
-              font-size:11px;color:#00e5c2;white-space:nowrap;position:relative;z-index:1;">
-    <span style="width:6px;height:6px;border-radius:50%;background:#00e5c2;display:inline-block;
-                 box-shadow:0 0 8px rgba(0,229,194,0.8);"></span>
-    AI Platform v2
+    <div style="display:flex;align-items:center;gap:7px;background:rgba(0,229,194,0.08);
+                border:1px solid rgba(0,229,194,0.2);border-radius:30px;padding:7px 16px;
+                font-size:11px;color:#00e5c2;white-space:nowrap;">
+      <span style="width:6px;height:6px;border-radius:50%;background:#00e5c2;display:inline-block;
+                   box-shadow:0 0 8px rgba(0,229,194,0.8);"></span>
+      AI Platform v2
+    </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ── HELPER: DATA QUALITY SCORE ────────────────────────────────────────────────
+def compute_data_quality(df, target_col):
+    scores = {}
+    total  = len(df)
+
+    missing_pct   = df.isnull().mean().mean() * 100
+    duplicate_pct = df.duplicated().sum() / total * 100
+
+    num_cols = df.select_dtypes(include=['number']).columns.tolist()
+    skewed   = 0
+    for c in num_cols:
+        if c != target_col:
+            try:
+                if abs(df[c].skew()) > 2:
+                    skewed += 1
+            except Exception:
+                pass
+    skew_pct = (skewed / max(len(num_cols), 1)) * 100
+
+    imbalance_score = 0
+    if df[target_col].dtype == 'object' or df[target_col].nunique() <= 10:
+        vc = df[target_col].value_counts(normalize=True)
+        if len(vc) > 1:
+            imbalance_score = (1 - vc.min()) * 100 * 0.5
+
+    overall = max(0, 100 - missing_pct * 2 - duplicate_pct - skew_pct * 0.3 - imbalance_score * 0.2)
+
+    return {
+        "overall":    round(overall, 1),
+        "missing":    round(missing_pct, 1),
+        "duplicates": round(duplicate_pct, 1),
+        "skewed":     skewed,
+        "imbalance":  round(imbalance_score, 1),
+    }
+
+# ── SAMPLE DATASETS ───────────────────────────────────────────────────────────
+def get_sample_datasets():
+    titanic_url = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
+    iris_url    = "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv"
+    house_url   = "https://raw.githubusercontent.com/selva86/datasets/master/BostonHousing.csv"
+    return {
+        "🚢 Titanic (Classification)": (titanic_url, "Survived"),
+        "🌸 Iris Flowers (Classification)": (iris_url, "species"),
+        "🏠 Boston Housing (Regression)": (house_url, "medv"),
+    }
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
-      <div style="width:34px;height:34px;border-radius:11px;
-                  background:linear-gradient(135deg,#00e5c2,#0077ff);
+      <div style="width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,#00e5c2,#0077ff);
                   display:flex;align-items:center;justify-content:center;
                   box-shadow:0 4px 16px rgba(0,229,194,0.25);font-size:16px;">⚙️</div>
       <div>
@@ -254,11 +148,14 @@ with st.sidebar:
 
     uploaded_file = st.file_uploader("📂 Upload CSV Dataset", type=["csv"], key="train_data")
 
+    st.markdown('<div style="font-size:9px;color:rgba(255,255,255,0.25);letter-spacing:1.2px;margin:12px 0 8px;">OR TRY A SAMPLE DATASET</div>', unsafe_allow_html=True)
+    sample_datasets = get_sample_datasets()
+    sample_choice   = st.selectbox("Choose sample", ["— None —"] + list(sample_datasets.keys()), label_visibility="collapsed")
+
     if uploaded_file is not None:
         if "last_uploaded" not in st.session_state or st.session_state.last_uploaded != uploaded_file.name:
             st.session_state.last_uploaded = uploaded_file.name
-            # Clear all saved files including individual models
-            import glob
+            st.session_state.pop("sample_df", None)
             files_to_clear = (
                 ["outputs/best_model.pkl", "outputs/performance_report.csv",
                  "outputs/target_encoder.pkl", "outputs/preprocessor.pkl"]
@@ -268,33 +165,45 @@ with st.sidebar:
                 if os.path.exists(f):
                     os.remove(f)
 
-# ── LANDING PAGE ──────────────────────────────────────────────────────────────
-if uploaded_file is None:
-    st.markdown("""
-    <div style="text-align:center;padding:16px 0 8px;">
-      <p style="font-size:13px;color:rgba(255,255,255,0.3);">
-        Upload a CSV file in the sidebar to begin
-      </p>
-    </div>
-    """, unsafe_allow_html=True)
+# ── RESOLVE DATA SOURCE ───────────────────────────────────────────────────────
+sample_target = None
+if uploaded_file is not None:
+    raw_df = pd.read_csv(uploaded_file)
+elif sample_choice != "— None —":
+    url, sample_target = sample_datasets[sample_choice]
+    if "sample_df" not in st.session_state or st.session_state.get("sample_name") != sample_choice:
+        with st.spinner("Loading sample dataset..."):
+            try:
+                st.session_state.sample_df   = pd.read_csv(url)
+                st.session_state.sample_name = sample_choice
+                files_to_clear = (
+                    ["outputs/best_model.pkl", "outputs/performance_report.csv",
+                     "outputs/target_encoder.pkl", "outputs/preprocessor.pkl"]
+                    + glob.glob("outputs/model_*.pkl")
+                )
+                for f in files_to_clear:
+                    if os.path.exists(f):
+                        os.remove(f)
+            except Exception as e:
+                st.error(f"Could not load sample: {e}")
+    raw_df = st.session_state.get("sample_df", None)
+else:
+    raw_df = None
 
+# ── LANDING ───────────────────────────────────────────────────────────────────
+if raw_df is None:
+    st.markdown('<div style="text-align:center;padding:16px 0 8px;"><p style="font-size:13px;color:rgba(255,255,255,0.3);">Upload a CSV or choose a sample dataset to begin</p></div>', unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
     cards = [
-        ("📥", "Ingest", "0,119,255", "Upload raw, messy data. Auto-handles missing values and formats."),
-        ("🧠", "Train", "0,229,194", "Detects task type automatically. Trains multiple models simultaneously."),
-        ("⚡", "Predict", "245,158,11", "Deploy the winning model instantly for single or bulk predictions."),
+        ("📥", "Ingest", "0,119,255", "Upload raw data or pick a built-in demo dataset. Auto-handles missing values."),
+        ("🧠", "Train", "0,229,194", "Detects task type. Trains XGBoost, LightGBM, Random Forest & more simultaneously."),
+        ("⚡", "Predict", "245,158,11", "Deploy winning model instantly. Single or bulk predictions with confidence scores."),
     ]
     for col, (icon, title, rgb, desc) in zip([col1, col2, col3], cards):
         with col:
             st.markdown(f"""
-            <div style="
-                background: rgba(255,255,255,0.02);
-                border: 1px solid rgba({rgb},0.15);
-                border-radius: 20px;
-                padding: 22px 18px;
-                text-align: center;
-                transition: all 0.25s;
-            ">
+            <div style="background:rgba(255,255,255,0.02);border:1px solid rgba({rgb},0.15);
+                        border-radius:20px;padding:22px 18px;text-align:center;">
               <div style="font-size:28px;margin-bottom:12px;">{icon}</div>
               <h3 style="color:#fff;font-size:15px;margin-bottom:8px;">{title}</h3>
               <p style="color:rgba(255,255,255,0.3);font-size:12px;line-height:1.7;">{desc}</p>
@@ -302,22 +211,51 @@ if uploaded_file is None:
             """, unsafe_allow_html=True)
 
 else:
-    raw_df = pd.read_csv(uploaded_file)
-
-    # Dataset preview
-    st.markdown(f"""
-    <div style="font-size:12px;color:rgba(255,255,255,0.3);margin-bottom:6px;letter-spacing:0.5px;">
-      DATASET · {raw_df.shape[0]} rows · {raw_df.shape[1]} columns
-    </div>
-    """, unsafe_allow_html=True)
+    # ── DATASET PREVIEW ───────────────────────────────────────────────────────
+    st.markdown(f'<div style="font-size:12px;color:rgba(255,255,255,0.3);margin-bottom:6px;letter-spacing:0.5px;">DATASET · {raw_df.shape[0]} rows · {raw_df.shape[1]} columns</div>', unsafe_allow_html=True)
     st.dataframe(raw_df.head(), use_container_width=True)
 
     with st.sidebar:
-        st.markdown("""<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);margin:8px 0 16px;"></div>""", unsafe_allow_html=True)
+        st.markdown('<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);margin:8px 0 16px;"></div>', unsafe_allow_html=True)
         st.markdown('<div style="font-size:9px;color:rgba(255,255,255,0.25);letter-spacing:1.2px;margin-bottom:8px;">TARGET COLUMN</div>', unsafe_allow_html=True)
-        target_col = st.selectbox("What should the AI predict?", options=raw_df.columns, index=len(raw_df.columns)-1)
+        default_idx = list(raw_df.columns).index(sample_target) if sample_target and sample_target in raw_df.columns else len(raw_df.columns) - 1
+        target_col  = st.selectbox("What should the AI predict?", options=raw_df.columns, index=default_idx)
 
-    # EDA
+    # ── DATA QUALITY SCORE ────────────────────────────────────────────────────
+    dq = compute_data_quality(raw_df, target_col)
+    score_color = "#00e5c2" if dq["overall"] >= 80 else "#f59e0b" if dq["overall"] >= 60 else "#f87171"
+    st.markdown(f"""
+    <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);
+                border-radius:18px;padding:18px 22px;margin:12px 0;">
+      <div style="font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:1px;margin-bottom:14px;">DATA QUALITY SCORE</div>
+      <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+        <div style="text-align:center;">
+          <div style="font-size:36px;font-weight:600;color:{score_color};">{dq['overall']}%</div>
+          <div style="font-size:10px;color:rgba(255,255,255,0.25);">Overall Health</div>
+        </div>
+        <div style="flex:1;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;">
+          <div style="background:rgba(255,255,255,0.02);border-radius:12px;padding:10px 14px;">
+            <div style="font-size:10px;color:rgba(255,255,255,0.25);margin-bottom:4px;">Missing Values</div>
+            <div style="font-size:16px;font-weight:500;color:{'#f87171' if dq['missing']>10 else '#00e5c2'};">{dq['missing']}%</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.02);border-radius:12px;padding:10px 14px;">
+            <div style="font-size:10px;color:rgba(255,255,255,0.25);margin-bottom:4px;">Duplicate Rows</div>
+            <div style="font-size:16px;font-weight:500;color:{'#f87171' if dq['duplicates']>5 else '#00e5c2'};">{dq['duplicates']}%</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.02);border-radius:12px;padding:10px 14px;">
+            <div style="font-size:10px;color:rgba(255,255,255,0.25);margin-bottom:4px;">Skewed Columns</div>
+            <div style="font-size:16px;font-weight:500;color:{'#f59e0b' if dq['skewed']>3 else '#00e5c2'};">{dq['skewed']}</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.02);border-radius:12px;padding:10px 14px;">
+            <div style="font-size:10px;color:rgba(255,255,255,0.25);margin-bottom:4px;">Class Imbalance</div>
+            <div style="font-size:16px;font-weight:500;color:{'#f59e0b' if dq['imbalance']>30 else '#00e5c2'};">{dq['imbalance']}%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── EDA ───────────────────────────────────────────────────────────────────
     st.markdown('<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);margin:8px 0;"></div>', unsafe_allow_html=True)
     with st.expander("🔍 Exploratory Data Analysis"):
         col1, col2 = st.columns(2)
@@ -345,81 +283,77 @@ else:
 
     st.markdown('<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);margin:16px 0;"></div>', unsafe_allow_html=True)
 
-    # Run pipeline
-    st.markdown("""
-    <div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1.2px;margin-bottom:10px;">
-      PIPELINE
-    </div>
-    """, unsafe_allow_html=True)
+    # ── PIPELINE ──────────────────────────────────────────────────────────────
+    st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1.2px;margin-bottom:10px;">PIPELINE</div>', unsafe_allow_html=True)
 
     if st.button("🚀 Start Automated Machine Learning", type="primary"):
-        with st.spinner("Analyzing task type, cleaning data, and training algorithms..."):
-            try:
-                cleaner = DataCleaner(raw_df)
-                cleaned_df = cleaner.clean()
+        prog = st.progress(0, text="Cleaning data...")
+        try:
+            cleaner    = DataCleaner(raw_df)
+            cleaned_df = cleaner.clean()
+            prog.progress(20, text="Preprocessing features...")
 
-                preprocessor = Preprocessor(cleaned_df, target_column=target_col)
-                X, y = preprocessor.process()
+            preprocessor = Preprocessor(cleaned_df, target_column=target_col)
+            X, y = preprocessor.process()
+            prog.progress(40, text="Saving preprocessor...")
 
-                target_encoder = preprocessor.get_target_encoder()
-                if not os.path.exists("outputs"):
-                    os.makedirs("outputs")
-                if target_encoder is not None:
-                    with open("outputs/target_encoder.pkl", "wb") as f:
-                        pickle.dump(target_encoder, f)
-                # ✅ Save the fitted preprocessor so predictions reuse same features
-                with open("outputs/preprocessor.pkl", "wb") as f:
-                    pickle.dump(preprocessor, f)
+            os.makedirs("outputs", exist_ok=True)
+            target_encoder = preprocessor.get_target_encoder()
+            if target_encoder is not None:
+                with open("outputs/target_encoder.pkl", "wb") as f:
+                    pickle.dump(target_encoder, f)
+            with open("outputs/preprocessor.pkl", "wb") as f:
+                pickle.dump(preprocessor, f)
 
-                # Show column handling report
-                col_report = preprocessor.get_column_report()
-                text_cols  = col_report["text_columns"]
-                cat_cols   = [c for c in col_report["categorical_columns"] if c != target_col]
-                tfidf_info = col_report["tfidf_features"]
-                dropped_cols = col_report.get("dropped_columns", [])
-                if text_cols or cat_cols or dropped_cols:
-                    report_html = '<div style="background:rgba(0,119,255,0.05);border:1px solid rgba(0,119,255,0.15);border-radius:14px;padding:14px 18px;margin-bottom:12px;">'
-                    report_html += '<div style="font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:1px;margin-bottom:10px;">COLUMN HANDLING REPORT</div>'
-                    report_html += '<div style="display:flex;flex-wrap:wrap;gap:8px;">'
-                    for col in text_cols:
-                        feat = tfidf_info.get(col, "TF-IDF")
-                        report_html += f'<span style="background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.25);border-radius:20px;padding:4px 12px;font-size:11px;color:#c4b5fd;">📝 {col} → TF-IDF ({feat})</span>'
-                    for col in cat_cols:
-                        report_html += f'<span style="background:rgba(0,229,194,0.08);border:1px solid rgba(0,229,194,0.2);border-radius:20px;padding:4px 12px;font-size:11px;color:#00e5c2;">🏷️ {col} → Label Encoded</span>'
-                    for col in dropped_cols:
-                        report_html += f'<span style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);border-radius:20px;padding:4px 12px;font-size:11px;color:#f87171;">🗑️ {col} → Dropped (noise)</span>'
-                    report_html += '</div></div>'
-                    st.markdown(report_html, unsafe_allow_html=True)
+            # Column report
+            col_report   = preprocessor.get_column_report()
+            text_cols    = col_report["text_columns"]
+            cat_cols     = [c for c in col_report["categorical_columns"] if c != target_col]
+            tfidf_info   = col_report["tfidf_features"]
+            dropped_cols = col_report.get("dropped_columns", [])
+            if text_cols or cat_cols or dropped_cols:
+                rh = '<div style="background:rgba(0,119,255,0.05);border:1px solid rgba(0,119,255,0.15);border-radius:14px;padding:14px 18px;margin-bottom:12px;">'
+                rh += '<div style="font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:1px;margin-bottom:10px;">COLUMN HANDLING REPORT</div>'
+                rh += '<div style="display:flex;flex-wrap:wrap;gap:8px;">'
+                for col in text_cols:
+                    feat = tfidf_info.get(col, "TF-IDF")
+                    rh += f'<span style="background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.25);border-radius:20px;padding:4px 12px;font-size:11px;color:#c4b5fd;">📝 {col} → TF-IDF ({feat})</span>'
+                for col in cat_cols:
+                    rh += f'<span style="background:rgba(0,229,194,0.08);border:1px solid rgba(0,229,194,0.2);border-radius:20px;padding:4px 12px;font-size:11px;color:#00e5c2;">🏷️ {col} → Label Encoded</span>'
+                for col in dropped_cols:
+                    rh += f'<span style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);border-radius:20px;padding:4px 12px;font-size:11px;color:#f87171;">🗑️ {col} → Dropped (noise)</span>'
+                rh += '</div></div>'
+                st.markdown(rh, unsafe_allow_html=True)
 
-                trainer = ModelTrainer(X, y)
-                results_df = trainer.train_and_evaluate()
-                trainer.save_best_model("outputs")
-                trainer.save_all_models("outputs")   # ✅ save every model
-                results_df.to_csv("outputs/performance_report.csv", index=False)
-
-                st.success("✅ Pipeline complete! Results ready below.")
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
+            prog.progress(50, text="Training models (XGBoost, LightGBM, Random Forest...)...")
+            trainer    = ModelTrainer(X, y)
+            results_df = trainer.train_and_evaluate()
+            prog.progress(85, text="Saving models...")
+            trainer.save_best_model("outputs")
+            trainer.save_all_models("outputs")
+            results_df.to_csv("outputs/performance_report.csv", index=False)
+            prog.progress(100, text="Done!")
+            st.success("✅ Pipeline complete! Results ready below.")
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
 
     st.markdown('<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);margin:16px 0;"></div>', unsafe_allow_html=True)
 
-    # ── RESULTS ──────────────────────────────────────────────────────────────
-    report_path = "outputs/performance_report.csv"
-    model_path  = "outputs/best_model.pkl"
+    # ── RESULTS ───────────────────────────────────────────────────────────────
+    report_path  = "outputs/performance_report.csv"
+    model_path   = "outputs/best_model.pkl"
     encoder_path = "outputs/target_encoder.pkl"
+    prep_path    = "outputs/preprocessor.pkl"
 
     if os.path.exists(report_path) and os.path.exists(model_path):
         report = pd.read_csv(report_path)
         model  = joblib.load(model_path)
 
-        target_encoder = None
+        target_encoder     = None
+        saved_preprocessor = None
         if os.path.exists(encoder_path):
             with open(encoder_path, "rb") as f:
                 target_encoder = pickle.load(f)
-
-        # ✅ Load saved preprocessor — reuse for predictions (fixes feature mismatch)
-        saved_preprocessor = None
-        prep_path = "outputs/preprocessor.pkl"
         if os.path.exists(prep_path):
             with open(prep_path, "rb") as f:
                 saved_preprocessor = pickle.load(f)
@@ -428,24 +362,15 @@ else:
         best_model_name   = report.iloc[0]['Model']
         original_classes  = sorted(raw_df[target_col].dropna().unique())
 
-        # ── MODEL SWITCHER ───────────────────────────────────────────────────
-        all_model_names = report['Model'].tolist()
-
-        st.markdown("""
-        <div style="font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:1.2px;margin-bottom:8px;">
-          MODEL SELECTION
-        </div>""", unsafe_allow_html=True)
-
+        # ── MODEL SWITCHER ────────────────────────────────────────────────────
+        st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:1.2px;margin-bottom:8px;">MODEL SELECTION</div>', unsafe_allow_html=True)
         col_sel, col_info = st.columns([2, 1])
         with col_sel:
             selected_model_name = st.selectbox(
                 "Choose model to use for predictions",
-                options=all_model_names,
-                index=0,
-                help="Auto-selected = best performing model. You can switch to any other trained model."
+                options=report['Model'].tolist(), index=0,
+                help="Auto-selected = best performing. Switch to compare any trained model."
             )
-
-        # Load selected model
         selected_model_path = f"outputs/model_{selected_model_name.replace(' ', '_')}.pkl"
         if selected_model_name != best_model_name and os.path.exists(selected_model_path):
             model = joblib.load(selected_model_path)
@@ -459,7 +384,6 @@ else:
 
         st.markdown('<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);margin:10px 0 14px;"></div>', unsafe_allow_html=True)
 
-        # Download button
         active_model_path = selected_model_path if (selected_model_name != best_model_name and os.path.exists(selected_model_path)) else model_path
         with open(active_model_path, "rb") as f:
             st.download_button(
@@ -470,41 +394,48 @@ else:
             )
 
         st.write("")
-
         tab1, tab2, tab3, tab4 = st.tabs(["📊 Results", "📈 Visuals & Explainability", "🔮 Single Predict", "📦 Batch Predict"])
 
-        # ── TAB 1: RESULTS ───────────────────────────────────────────────────
+        # ── TAB 1: RESULTS ────────────────────────────────────────────────────
         with tab1:
             if is_classification:
                 best_score = report.iloc[0]['Accuracy']
-                c1, c2, c3 = st.columns(3)
-                c1.metric("🏆 Winning Algorithm", best_model_name)
-                c2.metric("🎯 Accuracy", f"{best_score*100:.2f}%")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("🏆 Best Model",    best_model_name)
+                c2.metric("🎯 Accuracy",      f"{best_score*100:.2f}%")
                 c3.metric("📊 Models Tested", str(len(report)))
+                if 'CV Mean' in report.columns:
+                    cv_mean = report.iloc[0]['CV Mean']
+                    cv_std  = report.iloc[0]['CV Std']
+                    c4.metric("🔁 CV Score", f"{cv_mean*100:.1f}% ±{cv_std*100:.1f}%")
                 st.write("")
-                st.dataframe(
-                    report.style.highlight_max(subset=['Accuracy','F1-Score'], color='rgba(0,229,194,0.15)'),
-                    use_container_width=True
-                )
+                display_cols = [c for c in ['Model','Accuracy','F1-Score','CV Mean','CV Std'] if c in report.columns]
+                fmt = report[display_cols].copy()
+                if 'CV Mean' in fmt.columns:
+                    fmt['CV Mean'] = fmt['CV Mean'].apply(lambda x: f"{x*100:.1f}%")
+                if 'CV Std' in fmt.columns:
+                    fmt['CV Std']  = fmt['CV Std'].apply(lambda x: f"±{x*100:.1f}%")
+                st.dataframe(fmt, use_container_width=True)
             else:
                 best_score = report.iloc[0]['R2-Score']
                 rmse_score = report.iloc[0]['RMSE (Error)']
-                c1, c2, c3 = st.columns(3)
-                c1.metric("🏆 Winning Algorithm", best_model_name)
-                c2.metric("🎯 R2-Score", f"{best_score:.4f}")
-                c3.metric("📉 RMSE", f"{rmse_score:,.2f}", delta="lower is better", delta_color="inverse")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("🏆 Best Model", best_model_name)
+                c2.metric("🎯 R2-Score",   f"{best_score:.4f}")
+                c3.metric("📉 RMSE",       f"{rmse_score:,.2f}", delta="lower is better", delta_color="inverse")
+                if 'CV Mean' in report.columns:
+                    cv_mean = report.iloc[0]['CV Mean']
+                    cv_std  = report.iloc[0]['CV Std']
+                    c4.metric("🔁 CV Score", f"{cv_mean:.3f} ±{cv_std:.3f}")
                 st.write("")
-                st.dataframe(
-                    report.style.highlight_max(subset=['R2-Score'], color='rgba(0,229,194,0.15)')
-                                .highlight_min(subset=['RMSE (Error)'], color='rgba(0,229,194,0.15)'),
-                    use_container_width=True
-                )
+                display_cols = [c for c in ['Model','R2-Score','RMSE (Error)','CV Mean','CV Std'] if c in report.columns]
+                st.dataframe(report[display_cols], use_container_width=True)
 
             # Bar chart
             metric = 'Accuracy' if is_classification else 'R2-Score'
             if metric in report.columns:
-                st.markdown(f'<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1px;margin:16px 0 8px;">MODEL COMPARISON</div>', unsafe_allow_html=True)
-                fig_bar, ax_bar = plt.subplots(figsize=(8, 3.5))
+                st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1px;margin:16px 0 8px;">MODEL COMPARISON</div>', unsafe_allow_html=True)
+                fig_bar, ax_bar = plt.subplots(figsize=(8, max(3, len(report) * 0.6)))
                 fig_bar.patch.set_facecolor('#0d1325')
                 ax_bar.set_facecolor('#0d1325')
                 colors = ['#00e5c2' if i == 0 else '#1e3a5f' for i in range(len(report))]
@@ -515,6 +446,20 @@ else:
                 ax_bar.set_xlabel(metric, color='#4b5563', fontsize=10)
                 ax_bar.set_ylabel("")
                 st.pyplot(fig_bar)
+
+            # CV comparison chart
+            if 'CV Mean' in report.columns:
+                st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1px;margin:16px 0 8px;">CROSS-VALIDATION SCORES (5-Fold)</div>', unsafe_allow_html=True)
+                fig_cv, ax_cv = plt.subplots(figsize=(8, max(3, len(report) * 0.6)))
+                fig_cv.patch.set_facecolor('#0d1325')
+                ax_cv.set_facecolor('#0d1325')
+                ax_cv.barh(report['Model'], report['CV Mean'],
+                           xerr=report['CV Std'], color='#6366f1',
+                           error_kw={'ecolor': '#a5b4fc', 'capsize': 4})
+                ax_cv.set_title("CV Mean ± Std", color='#6b7280', fontsize=11)
+                ax_cv.tick_params(labelcolor='#6b7280', color='#1e293b')
+                ax_cv.spines[:].set_color('#1e293b')
+                st.pyplot(fig_cv)
 
         # ── TAB 2: VISUALS ────────────────────────────────────────────────────
         with tab2:
@@ -534,18 +479,18 @@ else:
                 ax_eval.set_facecolor('#0d1325')
                 if is_classification:
                     cm = confusion_matrix(y_eval, y_pred_eval)
-                    sns.heatmap(cm, annot=True, fmt='d', cmap='YlGnBu', ax=ax_eval, cbar=False,
-                                linewidths=0.5, linecolor='#0d1325')
+                    sns.heatmap(cm, annot=True, fmt='d', cmap='YlGnBu', ax=ax_eval,
+                                cbar=False, linewidths=0.5, linecolor='#0d1325')
                     ax_eval.set_title("Confusion Matrix", color='#6b7280', fontsize=12)
                     ax_eval.set_xlabel("Predicted", color='#4b5563', fontsize=11)
-                    ax_eval.set_ylabel("Actual", color='#4b5563', fontsize=11)
+                    ax_eval.set_ylabel("Actual",    color='#4b5563', fontsize=11)
                 else:
                     ax_eval.scatter(y_eval, y_pred_eval, alpha=0.55, color='#00e5c2', edgecolors='#0d1325', s=40)
                     mn = min(y_eval.min(), y_pred_eval.min())
                     mx = max(y_eval.max(), y_pred_eval.max())
                     ax_eval.plot([mn, mx], [mn, mx], '--', color='#334155', lw=1.5, label="Perfect")
                     ax_eval.set_title("Actual vs Predicted", color='#6b7280', fontsize=12)
-                    ax_eval.set_xlabel("Actual", color='#4b5563')
+                    ax_eval.set_xlabel("Actual",    color='#4b5563')
                     ax_eval.set_ylabel("Predicted", color='#4b5563')
                     ax_eval.legend(labelcolor='#6b7280', framealpha=0)
                 ax_eval.tick_params(labelcolor='#6b7280', color='#1e293b')
@@ -563,7 +508,7 @@ else:
                     prep_explain = Preprocessor(raw_df, target_column=target_col)
                     X_explain, _ = prep_explain.process()
                 feature_names = X_explain.columns
-                importances = None
+                importances   = None
                 if hasattr(model, 'feature_importances_'):
                     importances = model.feature_importances_
                 elif hasattr(model, 'coef_'):
@@ -574,10 +519,8 @@ else:
                     fig_imp, ax_imp = plt.subplots(figsize=(8, 4))
                     fig_imp.patch.set_facecolor('#0d1325')
                     ax_imp.set_facecolor('#0d1325')
-                    colors_imp = [f'#{int(0 + (0)*i/9):02x}{int(184 + (229-184)*i/9):02x}{int(148 + (194-148)*i/9):02x}'
-                                  for i in range(len(imp_df))]
                     sns.barplot(data=imp_df, x='Importance', y='Feature', palette='cool', ax=ax_imp)
-                    ax_imp.set_title("Top Features", color='#6b7280', fontsize=11)
+                    ax_imp.set_title("Top 10 Features", color='#6b7280', fontsize=11)
                     ax_imp.tick_params(labelcolor='#6b7280', color='#1e293b')
                     ax_imp.spines[:].set_color('#1e293b')
                     ax_imp.set_xlabel("Importance", color='#4b5563')
@@ -603,9 +546,9 @@ else:
                             X_new = saved_preprocessor.transform(edited_df)
                         else:
                             combined_df = pd.concat([raw_df, edited_df], ignore_index=True)
-                            prep_new = Preprocessor(combined_df, target_column=target_col)
-                            X_new, _ = prep_new.process()
-                            X_new = X_new.iloc[[-1]]
+                            prep_new    = Preprocessor(combined_df, target_column=target_col)
+                            X_new, _    = prep_new.process()
+                            X_new       = X_new.iloc[[-1]]
                         raw_prediction = model.predict(X_new)[0]
 
                         if is_classification:
@@ -626,7 +569,7 @@ else:
                             """, unsafe_allow_html=True)
                             if hasattr(model, 'predict_proba'):
                                 try:
-                                    proba = model.predict_proba(X_new.iloc[[-1]])[0]
+                                    proba        = model.predict_proba(X_new)[0]
                                     class_labels = target_encoder.classes_ if target_encoder else [str(c) for c in original_classes]
                                     st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1px;margin:14px 0 8px;">CONFIDENCE</div>', unsafe_allow_html=True)
                                     for cls, prob in zip(class_labels, proba):
@@ -648,13 +591,12 @@ else:
         # ── TAB 4: BATCH PREDICT ──────────────────────────────────────────────
         with tab4:
             st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1px;margin-bottom:12px;">BULK BATCH PREDICTION</div>', unsafe_allow_html=True)
-            st.markdown('<p style="font-size:12px;color:rgba(255,255,255,0.3);">Upload a CSV with the same columns as your training data (without the target column).</p>', unsafe_allow_html=True)
+            st.markdown('<p style="font-size:12px;color:rgba(255,255,255,0.3);">Upload a CSV with the same columns as training data (without the target column).</p>', unsafe_allow_html=True)
             batch_file = st.file_uploader("Upload Batch CSV", type=["csv"], key="batch_data")
 
             if batch_file is not None:
                 batch_df = pd.read_csv(batch_file)
                 st.info(f"Loaded {len(batch_df)} rows for batch prediction.")
-
                 if st.button("🚀 Run Batch Prediction", type="primary"):
                     with st.spinner("Processing batch..."):
                         try:
@@ -664,10 +606,10 @@ else:
                             if saved_preprocessor:
                                 X_batch = saved_preprocessor.transform(batch_process_df)
                             else:
-                                combined_batch = pd.concat([raw_df, batch_process_df], ignore_index=True)
-                                prep_batch = Preprocessor(combined_batch, target_column=target_col)
-                                X_batch, _ = prep_batch.process()
-                                X_batch = X_batch.iloc[-len(batch_df):]
+                                combined_batch   = pd.concat([raw_df, batch_process_df], ignore_index=True)
+                                prep_batch       = Preprocessor(combined_batch, target_column=target_col)
+                                X_batch, _       = prep_batch.process()
+                                X_batch          = X_batch.iloc[-len(batch_df):]
                             preds = model.predict(X_batch)
 
                             if is_classification:
@@ -692,4 +634,4 @@ else:
                                 mime="text/csv"
                             )
                         except Exception as e:
-                            st.error(f"⚠️ Batch prediction failed. Make sure your file matches the original structure! Details: {e}")
+                            st.error(f"⚠️ Batch prediction failed: {e}")
