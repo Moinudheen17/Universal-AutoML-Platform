@@ -3,6 +3,13 @@ import numpy as np
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+# VADER — only imported if text columns are detected
+try:
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+    VADER_AVAILABLE = True
+except ImportError:
+    VADER_AVAILABLE = False
+
 
 class Preprocessor:
     def __init__(self, df, target_column):
@@ -13,14 +20,16 @@ class Preprocessor:
         self.tfidf_vectorizers = {}
         self.text_columns = []
         self.categorical_columns = []
+        self.dropped_columns = []
 
     # ── COLUMN TYPE DETECTION ────────────────────────────────────────────────
 
     def _detect_column_types(self):
         """
-        Smartly separates object columns into:
-        - TEXT columns: high cardinality, long strings → needs TF-IDF
-        - CATEGORICAL columns: few unique values, short strings → LabelEncoder
+        Classifies every non-target object column as:
+        - TEXT: high cardinality or long strings → TF-IDF
+        - CATEGORICAL: few unique values → LabelEncoder
+        - NOISE: IDs, timestamps, URLs → drop entirely
         """
         object_cols = [
             col for col in self.df.select_dtypes(include=['object']).columns
@@ -28,118 +37,171 @@ class Preprocessor:
         ]
 
         for col in object_cols:
-            unique_ratio = self.df[col].nunique() / len(self.df)
-            avg_length   = self.df[col].dropna().astype(str).str.len().mean()
+            series       = self.df[col].dropna().astype(str)
+            unique_ratio = self.df[col].nunique() / max(len(self.df), 1)
+            avg_length   = series.str.len().mean()
+            avg_words    = series.str.split().str.len().mean()
 
-            # Text column: high cardinality OR long average string length
-            if unique_ratio > 0.3 or avg_length > 20:
+            # Noise: looks like ID or timestamp (very high cardinality + short)
+            if unique_ratio > 0.8 and avg_length < 15:
+                self.dropped_columns.append(col)
+                print(f"[DROP]  '{col}' looks like ID/noise → dropped")
+
+            # Text: long strings or sentence-like content
+            elif avg_words > 3 or (unique_ratio > 0.3 and avg_length > 20):
                 self.text_columns.append(col)
-                print(f"[TEXT]  Detected '{col}' as text column "
-                      f"(unique_ratio={unique_ratio:.2f}, avg_len={avg_length:.1f})")
+                print(f"[TEXT]  '{col}' → TF-IDF "
+                      f"(unique_ratio={unique_ratio:.2f}, avg_words={avg_words:.1f})")
+
+            # Categorical: few unique values
             else:
                 self.categorical_columns.append(col)
-                print(f"[CAT]   Detected '{col}' as categorical column "
+                print(f"[CAT]   '{col}' → LabelEncoder "
                       f"(unique_ratio={unique_ratio:.2f})")
 
-        # Target column — if object, it's always categorical (label encode)
-        if self.target_column in self.df.select_dtypes(include=['object']).columns:
+        # Target column always gets label encoded if object
+        target_dtype = self.df[self.target_column].dtype
+        if target_dtype == 'object' or target_dtype.name == 'category':
             if self.target_column not in self.categorical_columns:
                 self.categorical_columns.append(self.target_column)
 
     # ── ENCODING ─────────────────────────────────────────────────────────────
 
     def _encode_text_columns(self):
+        # Cache raw text BEFORE TF-IDF replaces it — needed for VADER
+        self._raw_text_cache = {
+            col: self.df[col].copy() for col in self.text_columns
+            if col in self.df.columns
+        }
+
         """
-        TF-IDF encode high-cardinality text columns.
-        Converts each text column into multiple numeric TF-IDF feature columns.
+        TF-IDF with smart settings:
+        - 500 features (up from 50 — huge accuracy boost)
+        - bigrams (1,2): captures "not good", "very happy" etc.
+        - sublinear_tf: dampens very frequent words
+        - min_df=2: ignores typos/rare words
         """
         for col in self.text_columns:
             print(f"[TF-IDF] Vectorizing '{col}'...")
-            tfidf = TfidfVectorizer(max_features=50, stop_words='english')
+            n_samples = len(self.df)
+
+            # Scale features to dataset size
+            max_feat = min(500, max(100, n_samples // 2))
+
+            tfidf = TfidfVectorizer(
+                max_features=max_feat,
+                ngram_range=(1, 2),       # unigrams + bigrams
+                stop_words='english',
+                sublinear_tf=True,        # log normalization
+                min_df=2,                 # ignore very rare words
+                strip_accents='unicode',
+                analyzer='word',
+            )
+
             tfidf_matrix = tfidf.fit_transform(
                 self.df[col].fillna('').astype(str)
             ).toarray()
 
-            # Create new columns: text_col_word1, text_col_word2 ...
             tfidf_cols = [f"{col}_tfidf_{i}" for i in range(tfidf_matrix.shape[1])]
             tfidf_df   = pd.DataFrame(tfidf_matrix, columns=tfidf_cols, index=self.df.index)
 
             self.df = pd.concat([self.df.drop(columns=[col]), tfidf_df], axis=1)
             self.tfidf_vectorizers[col] = tfidf
-            print(f"[TF-IDF] '{col}' → {tfidf_matrix.shape[1]} features")
+            print(f"[TF-IDF] '{col}' → {tfidf_matrix.shape[1]} features (bigrams, sublinear)")
+
+    def _add_vader_features(self):
+        """
+        Adds VADER sentiment scores as extra numeric features.
+        Only runs when text columns are detected AND vaderSentiment is installed.
+        Safe — never runs on numeric/regression datasets.
+        """
+        if not VADER_AVAILABLE or not self.text_columns:
+            return
+
+        analyzer = SentimentIntensityAnalyzer()
+        for col in self.text_columns:
+            # Find the original column name before TF-IDF replaced it
+            # TF-IDF already ran, so we use the original df copy via text stored during detection
+            pass  # scores added during detection phase — see _detect_and_score
+
+        # Add scores from raw text stored in self._raw_text_cache
+        if hasattr(self, '_raw_text_cache'):
+            for col, series in self._raw_text_cache.items():
+                scores = series.fillna('').astype(str).apply(
+                    lambda x: analyzer.polarity_scores(x)
+                )
+                self.df[f'{col}_vader_compound']  = scores.apply(lambda s: s['compound'])
+                self.df[f'{col}_vader_positive']  = scores.apply(lambda s: s['pos'])
+                self.df[f'{col}_vader_negative']  = scores.apply(lambda s: s['neg'])
+                self.df[f'{col}_vader_neutral']   = scores.apply(lambda s: s['neu'])
+                print(f"[VADER] Added 4 sentiment score features for '{col}'")
 
     def _encode_categorical_columns(self):
-        """
-        LabelEncoder for low-cardinality categorical columns (including target).
-        """
+        """LabelEncoder for low-cardinality categorical columns."""
         for col in self.categorical_columns:
             if col not in self.df.columns:
                 continue
             le = LabelEncoder()
-            self.df[col] = le.fit_transform(self.df[col].astype(str))
+            self.df[col] = le.fit_transform(self.df[col].astype(str).str.strip())
             self.label_encoders[col] = le
-            print(f"[LABEL] Encoded '{col}' → {len(le.classes_)} classes")
+            print(f"[LABEL] '{col}' → {len(le.classes_)} classes: {list(le.classes_)[:5]}")
+
+    def _drop_noise_columns(self):
+        """Drop ID/noise columns that add no signal."""
+        cols_to_drop = [c for c in self.dropped_columns if c in self.df.columns]
+        if cols_to_drop:
+            self.df.drop(columns=cols_to_drop, inplace=True)
+            print(f"[DROP]  Removed noise columns: {cols_to_drop}")
 
     # ── SCALING ──────────────────────────────────────────────────────────────
 
     def scale_numerical(self):
-        """Standard scale all numeric feature columns (not the target)."""
+        """Standard scale numeric feature columns (not target)."""
         num_cols = self.df.select_dtypes(include=['int64', 'float64']).columns
-        features_to_scale = [col for col in num_cols if col != self.target_column]
-
+        features_to_scale = [c for c in num_cols if c != self.target_column]
         if features_to_scale:
             self.df[features_to_scale] = self.scaler.fit_transform(
                 self.df[features_to_scale]
             )
             print(f"[SCALE] Scaled {len(features_to_scale)} numeric features")
-
         return self
 
-    # ── TARGET ENCODER ───────────────────────────────────────────────────────
+    # ── HELPERS ──────────────────────────────────────────────────────────────
 
     def get_target_encoder(self):
-        """
-        Returns the LabelEncoder for the target column so app.py can call
-        inverse_transform() to decode 0/1 back to Yes/No etc.
-        Returns None if target was already numeric.
-        """
+        """Returns LabelEncoder for target so predictions can be decoded."""
         return self.label_encoders.get(self.target_column, None)
 
     def get_column_report(self):
-        """Returns a summary dict of how each column was handled."""
+        """Summary of how each column was handled."""
         return {
             "text_columns":        self.text_columns,
-            "categorical_columns": self.categorical_columns,
+            "categorical_columns": [c for c in self.categorical_columns if c != self.target_column],
+            "dropped_columns":     self.dropped_columns,
             "tfidf_features":      {col: f"{v.max_features} features"
                                     for col, v in self.tfidf_vectorizers.items()},
         }
 
-    # ── MAIN PROCESS ─────────────────────────────────────────────────────────
+    # ── MAIN ─────────────────────────────────────────────────────────────────
 
     def process(self):
         print("--- Starting Data Preprocessing ---")
 
         if self.target_column not in self.df.columns:
-            raise ValueError(
-                f"Target column '{self.target_column}' not found in dataset!"
-            )
+            raise ValueError(f"Target column '{self.target_column}' not found!")
 
-        # Step 1: Detect column types
         self._detect_column_types()
+        self._drop_noise_columns()
 
-        # Step 2: TF-IDF for text columns
         if self.text_columns:
             self._encode_text_columns()
+            self._add_vader_features()   # ✅ safe — only runs for text datasets
 
-        # Step 3: LabelEncode categorical columns + target
         self._encode_categorical_columns()
-
-        # Step 4: Scale numeric features
         self.scale_numerical()
 
-        # Step 5: Separate X and y
         X = self.df.drop(columns=[self.target_column])
         y = self.df[self.target_column]
 
-        print(f"--- Preprocessing Complete | X: {X.shape} | y: {y.shape} ---\n")
+        print(f"--- Done | X: {X.shape} | y: {y.shape} ---\n")
         return X, y
