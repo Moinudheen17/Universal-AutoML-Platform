@@ -76,8 +76,17 @@ class ModelTrainer:
 
     def train_and_evaluate(self):
         print(f"[*] Task Detected: {self.task_type}")
+
+        # ✅ XGBoost/LightGBM require numeric labels — encode y if needed
+        y = self.y.copy()
+        self._y_encoder = None
+        if self.task_type == "Classification" and y.dtype == 'object':
+            from sklearn.preprocessing import LabelEncoder
+            self._y_encoder = LabelEncoder()
+            y = pd.Series(self._y_encoder.fit_transform(y), index=y.index)
+
         X_train, X_test, y_train, y_test = train_test_split(
-            self.X, self.y, test_size=0.2, random_state=42
+            self.X, y, test_size=0.2, random_state=42
         )
 
         models     = self._get_models()
@@ -96,7 +105,7 @@ class ModelTrainer:
                 f1     = f1_score(y_test, predictions, average='weighted')
 
                 # Cross-validation
-                cv     = cross_val_score(model, self.X, self.y, cv=cv_folds, scoring='accuracy')
+                cv      = cross_val_score(model, self.X, y, cv=cv_folds, scoring='accuracy')
                 cv_mean = cv.mean()
                 cv_std  = cv.std()
                 self.cv_scores[name] = {"mean": cv_mean, "std": cv_std}
@@ -118,7 +127,7 @@ class ModelTrainer:
                 rmse = np.sqrt(mean_squared_error(y_test, predictions))
 
                 # Cross-validation
-                cv     = cross_val_score(model, self.X, self.y, cv=cv_folds, scoring='r2')
+                cv      = cross_val_score(model, self.X, y, cv=cv_folds, scoring='r2')
                 cv_mean = cv.mean()
                 cv_std  = cv.std()
                 self.cv_scores[name] = {"mean": cv_mean, "std": cv_std}
