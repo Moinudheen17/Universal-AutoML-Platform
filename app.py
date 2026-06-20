@@ -11,6 +11,13 @@ from sklearn.metrics import confusion_matrix
 from modules.data_cleaner import DataCleaner
 from modules.preprocessor import Preprocessor
 from modules.model_trainer import ModelTrainer
+from modules.pdf_report import generate_pdf_report
+
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
 
 st.set_page_config(page_title="Universal AutoML Engine", page_icon="⚙️", layout="wide", initial_sidebar_state="expanded")
 
@@ -158,7 +165,8 @@ with st.sidebar:
             st.session_state.pop("sample_df", None)
             files_to_clear = (
                 ["outputs/best_model.pkl", "outputs/performance_report.csv",
-                 "outputs/target_encoder.pkl", "outputs/preprocessor.pkl"]
+                 "outputs/target_encoder.pkl", "outputs/preprocessor.pkl",
+                 "outputs/tuning_summary.pkl", "outputs/smote_applied.pkl"]
                 + glob.glob("outputs/model_*.pkl")
             )
             for f in files_to_clear:
@@ -286,16 +294,24 @@ else:
     # ── PIPELINE ──────────────────────────────────────────────────────────────
     st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1.2px;margin-bottom:10px;">PIPELINE</div>', unsafe_allow_html=True)
 
+    col_opt1, col_opt2 = st.columns(2)
+    with col_opt1:
+        enable_tuning = st.checkbox("⚡ Auto-tune hyperparameters", value=True,
+                                     help="Runs RandomizedSearchCV on each model. Slightly slower but more accurate.")
+    with col_opt2:
+        enable_smote = st.checkbox("⚖️ Auto-balance classes (SMOTE)", value=True,
+                                    help="Oversamples minority class if imbalance detected. Classification only.")
+
     if st.button("🚀 Start Automated Machine Learning", type="primary"):
         prog = st.progress(0, text="Cleaning data...")
         try:
             cleaner    = DataCleaner(raw_df)
             cleaned_df = cleaner.clean()
-            prog.progress(20, text="Preprocessing features...")
+            prog.progress(15, text="Preprocessing features...")
 
             preprocessor = Preprocessor(cleaned_df, target_column=target_col)
             X, y = preprocessor.process()
-            prog.progress(40, text="Saving preprocessor...")
+            prog.progress(30, text="Saving preprocessor...")
 
             os.makedirs("outputs", exist_ok=True)
             target_encoder = preprocessor.get_target_encoder()
@@ -325,15 +341,25 @@ else:
                 rh += '</div></div>'
                 st.markdown(rh, unsafe_allow_html=True)
 
-            prog.progress(50, text="Training models (XGBoost, LightGBM, Random Forest...)...")
-            trainer    = ModelTrainer(X, y)
+            prog.progress(45, text="Training models (XGBoost, LightGBM, Random Forest...)...")
+            trainer    = ModelTrainer(X, y, enable_tuning=enable_tuning, enable_smote=enable_smote)
             results_df = trainer.train_and_evaluate()
-            prog.progress(85, text="Saving models...")
+            prog.progress(80, text="Saving models...")
             trainer.save_best_model("outputs")
             trainer.save_all_models("outputs")
             results_df.to_csv("outputs/performance_report.csv", index=False)
+
+            # Save tuning summary + smote flag for display
+            with open("outputs/tuning_summary.pkl", "wb") as f:
+                pickle.dump(trainer.get_tuning_summary(), f)
+            with open("outputs/smote_applied.pkl", "wb") as f:
+                pickle.dump(trainer.smote_applied, f)
+
             prog.progress(100, text="Done!")
             st.success("✅ Pipeline complete! Results ready below.")
+
+            if trainer.smote_applied:
+                st.info("⚖️ Class imbalance detected — SMOTE oversampling was applied to balance training data.")
         except Exception as e:
             st.error(f"An error occurred: {e}")
 
@@ -461,6 +487,63 @@ else:
                 ax_cv.spines[:].set_color('#1e293b')
                 st.pyplot(fig_cv)
 
+            # ── HYPERPARAMETER TUNING IMPROVEMENT ───────────────────────────────
+            tuning_path = "outputs/tuning_summary.pkl"
+            if os.path.exists(tuning_path):
+                with open(tuning_path, "rb") as f:
+                    tuning_summary = pickle.load(f)
+                if tuning_summary and any(v.get("tuned") for v in tuning_summary.values()):
+                    st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1px;margin:16px 0 8px;">⚡ HYPERPARAMETER TUNING IMPACT</div>', unsafe_allow_html=True)
+                    rows = ""
+                    for name, vals in tuning_summary.items():
+                        if not vals.get("tuned"):
+                            continue
+                        before = vals["before"] * 100 if is_classification else vals["before"]
+                        after  = vals["after"] * 100 if is_classification else vals["after"]
+                        delta  = after - before
+                        delta_color = "#00e5c2" if delta >= 0 else "#f87171"
+                        unit = "%" if is_classification else ""
+                        rows += f"""
+                        <div style="display:flex;align-items:center;justify-content:space-between;
+                                    padding:10px 16px;border-radius:12px;background:rgba(255,255,255,0.02);
+                                    border:1px solid rgba(255,255,255,0.05);margin-bottom:6px;">
+                          <span style="font-size:12px;color:rgba(255,255,255,0.6);">{name}</span>
+                          <span style="font-size:12px;color:rgba(255,255,255,0.35);">{before:.2f}{unit} → {after:.2f}{unit}</span>
+                          <span style="font-size:12px;font-weight:600;color:{delta_color};">{'+' if delta>=0 else ''}{delta:.2f}{unit}</span>
+                        </div>"""
+                    st.markdown(rows, unsafe_allow_html=True)
+
+            # ── PDF EXPORT ───────────────────────────────────────────────────────
+            st.markdown('<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);margin:16px 0;"></div>', unsafe_allow_html=True)
+            try:
+                # Save charts to temp files for PDF embedding
+                os.makedirs("outputs/charts", exist_ok=True)
+                chart_paths = []
+                fig_bar.savefig("outputs/charts/comparison.png", dpi=120, bbox_inches='tight', facecolor='#0d1325')
+                chart_paths.append("outputs/charts/comparison.png")
+                if 'CV Mean' in report.columns:
+                    fig_cv.savefig("outputs/charts/cv_scores.png", dpi=120, bbox_inches='tight', facecolor='#0d1325')
+                    chart_paths.append("outputs/charts/cv_scores.png")
+
+                pdf_bytes = generate_pdf_report(
+                    dataset_name=getattr(uploaded_file, 'name', sample_choice if 'sample_choice' in dir() else "dataset"),
+                    task_type="Classification" if is_classification else "Regression",
+                    best_model_name=best_model_name,
+                    report_df=report,
+                    target_col=target_col,
+                    n_rows=raw_df.shape[0],
+                    n_cols=raw_df.shape[1],
+                    chart_image_paths=chart_paths
+                )
+                st.download_button(
+                    label="📄 Export Full Report as PDF",
+                    data=pdf_bytes,
+                    file_name="automl_report.pdf",
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.caption(f"PDF export unavailable: {e}")
+
         # ── TAB 2: VISUALS ────────────────────────────────────────────────────
         with tab2:
             st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1px;margin-bottom:12px;">EVALUATION VISUAL</div>', unsafe_allow_html=True)
@@ -530,6 +613,53 @@ else:
                     st.info("ℹ️ This model does not expose feature importances.")
             except Exception:
                 st.warning("⚠️ Could not generate feature importance chart.")
+
+            # ── SHAP EXPLAINABILITY ──────────────────────────────────────────────
+            st.markdown('<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);margin:16px 0;"></div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:10px;color:rgba(255,255,255,0.2);letter-spacing:1px;margin-bottom:4px;">SHAP EXPLAINABILITY</div>', unsafe_allow_html=True)
+            st.markdown('<p style="font-size:11px;color:rgba(255,255,255,0.25);margin-bottom:10px;">Shows how much each feature pushes predictions higher or lower, across all samples.</p>', unsafe_allow_html=True)
+
+            if not SHAP_AVAILABLE:
+                st.caption("SHAP not installed — add `shap` to requirements.txt to enable this.")
+            else:
+                with st.expander("🧠 Show SHAP Summary Plot (may take a few seconds)"):
+                    try:
+                        if saved_preprocessor:
+                            X_shap = saved_preprocessor.transform(raw_df)
+                        else:
+                            X_shap = X_explain
+
+                        # Sample for speed on larger datasets
+                        X_shap_sample = X_shap.sample(min(100, len(X_shap)), random_state=42) if len(X_shap) > 100 else X_shap
+
+                        model_type = type(model).__name__
+                        if any(t in model_type for t in ["RandomForest", "XGB", "LGBM", "GradientBoosting"]):
+                            explainer   = shap.TreeExplainer(model)
+                            shap_values = explainer.shap_values(X_shap_sample)
+                        else:
+                            background  = shap.sample(X_shap_sample, min(30, len(X_shap_sample)))
+                            explainer   = shap.KernelExplainer(model.predict, background)
+                            shap_values = explainer.shap_values(X_shap_sample, nsamples=50)
+
+                        # Handle multi-class (list of arrays) vs binary/regression (single array)
+                        if isinstance(shap_values, list):
+                            shap_vals_plot = shap_values[1] if len(shap_values) > 1 else shap_values[0]
+                        else:
+                            shap_vals_plot = shap_values
+
+                        fig_shap = plt.figure(figsize=(8, 5))
+                        fig_shap.patch.set_facecolor('#0d1325')
+                        shap.summary_plot(shap_vals_plot, X_shap_sample, show=False, plot_size=None)
+                        ax_list = fig_shap.get_axes()
+                        for ax in ax_list:
+                            ax.set_facecolor('#0d1325')
+                            ax.tick_params(labelcolor='#6b7280')
+                            for spine in ax.spines.values():
+                                spine.set_color('#1e293b')
+                        st.pyplot(fig_shap)
+                        st.caption("Each dot is one record. Red = high feature value, blue = low. Position shows impact on the prediction.")
+                    except Exception as e:
+                        st.warning(f"⚠️ Could not generate SHAP plot for this model/dataset combination. Details: {e}")
 
         # ── TAB 3: SINGLE PREDICT ─────────────────────────────────────────────
         with tab3:
