@@ -2,9 +2,12 @@ streamlit
 pandas
 numpy
 scikit-learn
-seaborn
 matplotlib
+seaborn
 joblib
+vaderSentiment
 xgboost
 lightgbm
-vaderSentiment
+imbalanced-learn
+shap
+reportlab
